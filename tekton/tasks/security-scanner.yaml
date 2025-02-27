@@ -1,0 +1,45 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: security-scanner
+spec:
+  workspaces:
+    - name: source
+  results:
+    - name: audit-report
+      description: Cargo audit results
+    - name: clippy-report
+      description: Clippy analysis results
+  steps:
+    - name: audit
+      image: rust:1.68
+      retries: 2
+      workingDir: $(workspaces.source.path)
+      resources:
+        requests:
+          memory: "1Gi"
+          cpu: "500m"
+        limits:
+          memory: "2Gi"
+          cpu: "1"
+      securityContext:
+        runAsNonRoot: true
+        allowPrivilegeEscalation: false
+      script: |
+        cargo audit --json > $(results.audit-report.path)
+    - name: clippy
+      image: rust:1.68
+      retries: 2
+      workingDir: $(workspaces.source.path)
+      resources:
+        requests:
+          memory: "1Gi"
+          cpu: "500m"
+        limits:
+          memory: "2Gi"
+          cpu: "1"
+      securityContext:
+        runAsNonRoot: true
+        allowPrivilegeEscalation: false
+      script: |
+        cargo clippy --message-format=json -- -D warnings > $(results.clippy-report.path) 

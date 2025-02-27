@@ -1,0 +1,43 @@
+{{- if .Values.backup.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "geospatial-api.fullname" . }}-backup
+  labels:
+    {{- include "geospatial-api.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.backup.schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: {{ .Values.backup.historyLimit }}
+  failedJobsHistoryLimit: {{ .Values.backup.historyLimit }}
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: backup
+            image: {{ .Values.backup.image.repository }}:{{ .Values.backup.image.tag }}
+            command:
+            - /bin/sh
+            - -c
+            - |
+              pg_dump -h {{ include "geospatial-api.postgresql.fullname" . }} \
+                      -U postgres \
+                      -d {{ .Values.postgresql.auth.database }} \
+                      -F c \
+                      -f /backup/backup-$(date +%Y%m%d-%H%M%S).dump
+            env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "geospatial-api.postgresql.secretName" . }}
+                  key: postgres-password
+            volumeMounts:
+            - name: backup
+              mountPath: /backup
+          volumes:
+          - name: backup
+            persistentVolumeClaim:
+              claimName: {{ include "geospatial-api.fullname" . }}-backup
+          restartPolicy: OnFailure
+{{- end }} 

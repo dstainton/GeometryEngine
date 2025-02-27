@@ -1,0 +1,186 @@
+# Default values for geospatial-api
+replicaCount: 2
+
+image:
+  repository: geospatial-api
+  tag: latest
+  pullPolicy: Always
+
+service:
+  type: ClusterIP
+  port: 8080
+
+route:
+  enabled: true
+  host: ""
+  tls:
+    enabled: true
+    termination: edge
+
+resources:
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+  requests:
+    cpu: 500m
+    memory: 512Mi
+
+postgresql:
+  auth:
+    postgresPassword: ""
+    database: geospatial
+  primary:
+    initdb:
+      scriptsConfigMap: geospatial-api-postgres-init
+    persistence:
+      size: 10Gi
+    resources:
+      limits:
+        memory: 2Gi
+        cpu: 1000m
+      requests:
+        memory: 1Gi
+        cpu: 500m
+
+redis:
+  auth:
+    enabled: true
+    password: ""
+  master:
+    persistence:
+      size: 5Gi
+    resources:
+      limits:
+        memory: 1Gi
+        cpu: 500m
+      requests:
+        memory: 512Mi
+        cpu: 250m
+
+masterApiKey: ""
+rateLimitPerMinute: 100
+
+logLevel: "info"
+
+extraConfig: {}
+
+extraSecrets: {}
+
+podSecurityContext:
+  fsGroup: 1000
+
+securityContext:
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 1000
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+podAntiAffinity:
+  preferredDuringSchedulingIgnoredDuringExecution:
+  - weight: 100
+    podAffinityTerm:
+      labelSelector:
+        matchExpressions:
+        - key: app.kubernetes.io/name
+          operator: In
+          values:
+          - {{ include "geospatial-api.name" . }}
+      topologyKey: kubernetes.io/hostname
+
+serviceAccount:
+  create: true
+  annotations:
+    serviceaccounts.openshift.io/oauth-redirectreference.primary: '{"kind":"OAuthRedirectReference","apiVersion":"v1","reference":{"kind":"Route","name":"{{ include "geospatial-api.fullname" . }}"}}'
+  name: ""
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: 80
+  customMetrics:
+    - type: Pods
+      pods:
+        metric:
+          name: http_requests_per_second
+        target:
+          type: AverageValue
+          averageValue: 100
+
+serviceMonitor:
+  enabled: false
+
+metrics:
+  enabled: true
+  path: /metrics
+  port: 9100
+
+grafana:
+  enabled: false
+  namespace: monitoring
+
+prometheus:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    interval: "15s"
+    scrapeTimeout: "14s"
+
+rateLimiter:
+  enabled: true
+  type: redis
+  redis:
+    keyPrefix: "ratelimit"
+    scriptPath: "/scripts/rate_limit.lua"
+  config:
+    burstSize: 50
+    refillRate: 10
+    refillTime: 60
+  resources:
+    limits:
+      cpu: 200m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+healthCheck:
+  enabled: true
+  port: 8081
+  livenessProbe:
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    successThreshold: 1
+    failureThreshold: 3
+  readinessProbe:
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    successThreshold: 1
+    failureThreshold: 3
+  startupProbe:
+    initialDelaySeconds: 10
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 30
+
+backup:
+  enabled: true
+  schedule: "0 1 * * *"
+  historyLimit: 7
+  image:
+    repository: postgres
+    tag: 15-alpine
+  storage:
+    size: 10Gi
+    storageClass: standard 

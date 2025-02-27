@@ -1,0 +1,53 @@
+version: '3.8'
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    ports:
+      - "8080:8080"
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=geospatial
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=development
+      - REDIS_URL=redis://redis:6379
+      - MASTER_API_KEY=dev-master-key
+      - RUST_LOG=debug
+    volumes:
+      - .:/usr/src/app
+      - target:/usr/src/app/target
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgis/postgis:15-3.3
+    environment:
+      - POSTGRES_DB=geospatial
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=development
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+      - ./migrations/001_indexes.sql:/docker-entrypoint-initdb.d/02-indexes.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+volumes:
+  target:
+  postgres_data:
+  redis_data: 

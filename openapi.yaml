@@ -1,0 +1,345 @@
+openapi: 3.0.3
+info:
+  title: Geospatial API
+  description: High-performance REST API for geospatial data management
+  version: 1.0.0
+  contact:
+    name: API Support
+    email: support@yourdomain.com
+
+servers:
+  - url: http://localhost:8080
+    description: Development server
+  - url: https://api.yourdomain.com
+    description: Production server
+
+security:
+  - ApiKeyAuth: []
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+
+  schemas:
+    Feature:
+      type: object
+      required:
+        - feature_id
+        - geometry
+        - input_srid
+      properties:
+        feature_id:
+          type: string
+        geometry:
+          $ref: '#/components/schemas/Geometry'
+        attributes:
+          type: object
+          additionalProperties: true
+        input_srid:
+          type: integer
+          example: 4326
+          enum: [
+            4326,   # WGS84
+            3857,   # Web Mercator
+            2163,   # US National Atlas Equal Area
+            3005,   # BC Albers
+            26907,  # UTM Zone 7N NAD83
+            26908,  # UTM Zone 8N NAD83
+            26909,  # UTM Zone 9N NAD83
+            26910,  # UTM Zone 10N NAD83
+            26911,  # UTM Zone 11N NAD83
+            3157,   # NAD83(CSRS) / BC Albers
+            4269,   # NAD83 Geographic
+            4617,   # NAD83(CSRS) Geographic
+            3155,   # NAD83(CSRS) / UTM Zone 7N
+            3156,   # NAD83(CSRS) / UTM Zone 8N
+            2955,   # NAD83(CSRS) / UTM Zone 9N
+            3158,   # NAD83(CSRS) / UTM Zone 10N
+            3159    # NAD83(CSRS) / UTM Zone 11N
+          ]
+          description: >
+            Supported coordinate systems:
+            - WGS84 (EPSG:4326)
+            - Web Mercator (EPSG:3857)
+            - US National Atlas (EPSG:2163)
+            - BC Albers (EPSG:3005)
+            - UTM Zone 7-11N NAD83 (EPSG:26907-26911)
+            - NAD83(CSRS) BC Albers (EPSG:3157)
+            - NAD83 Geographic (EPSG:4269)
+            - NAD83(CSRS) Geographic (EPSG:4617)
+            - NAD83(CSRS) UTM Zone 7N (EPSG:3155)
+            - NAD83(CSRS) UTM Zone 8N (EPSG:3156)
+            - NAD83(CSRS) UTM Zone 9N (EPSG:2955)
+            - NAD83(CSRS) UTM Zone 10N (EPSG:3158)
+            - NAD83(CSRS) UTM Zone 11N (EPSG:3159)
+
+    Geometry:
+      type: object
+      required:
+        - type
+        - coordinates
+      properties:
+        type:
+          type: string
+          enum: [Point, LineString, Polygon, MultiPoint, MultiLineString, MultiPolygon]
+        coordinates:
+          type: array
+
+    Dataset:
+      type: object
+      required:
+        - name
+        - api_key
+      properties:
+        name:
+          type: string
+        api_key:
+          type: string
+
+    SpatialQuery:
+      type: object
+      required:
+        - operation
+        - dataset_name
+        - geometry
+      properties:
+        operation:
+          type: string
+          enum: [intersects, contains, within]
+        dataset_name:
+          type: string
+        geometry:
+          $ref: '#/components/schemas/Geometry'
+        input_srid:
+          type: integer
+          default: 4326
+        output_srid:
+          type: integer
+          default: 4326
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+      responses:
+        400:
+          description: Bad Request (InvalidGeometry, InvalidProjection)
+        401:
+          description: Unauthorized (InvalidApiKey)
+        404:
+          description: Not Found (DatasetNotFound, FeatureNotFound)
+        409:
+          description: Conflict (DatasetExists, FeatureExists)
+        429:
+          description: Too Many Requests (RateLimitExceeded)
+        500:
+          description: Internal Server Error (Database, Cache, Pool errors)
+
+paths:
+  /api/v1/datasets:
+    post:
+      summary: Create a new dataset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Dataset'
+      responses:
+        '201':
+          description: Dataset created
+        '409':
+          description: Dataset already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    get:
+      summary: List all datasets
+      responses:
+        '200':
+          description: List of datasets
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Dataset'
+
+  /api/v1/datasets/{name}/features:
+    post:
+      summary: Store a new feature
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Feature'
+      responses:
+        '201':
+          description: Feature created
+        '409':
+          description: Feature ID already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/datasets/{name}/features/{id}:
+    put:
+      summary: Update a feature
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Feature'
+      responses:
+        '200':
+          description: Feature updated
+        '404':
+          description: Feature not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+    get:
+      summary: Get a feature
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Feature details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Feature'
+        '404':
+          description: Feature not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/spatial-query:
+    post:
+      summary: Execute a spatial query
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SpatialQuery'
+      responses:
+        '200':
+          description: Query results
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Feature'
+
+  /api/v1/api-keys:
+    post:
+      summary: Create a new API key
+      security:
+        - ApiKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - new_key
+              properties:
+                new_key:
+                  type: string
+                key_expires_in_seconds:
+                  type: integer
+                  default: 7776000
+                data_expires_in_seconds:
+                  type: integer
+                  default: 3600
+      responses:
+        '201':
+          description: API key created
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /health-check:
+    get:
+      summary: Check API health
+      security: []
+      responses:
+        '200':
+          description: API is healthy
+        '503':
+          description: API is unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /readiness-check:
+    get:
+      summary: Check if API is ready
+      security: []
+      responses:
+        '200':
+          description: API is ready
+        '503':
+          description: API is not ready
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /metrics:
+    get:
+      summary: Get Prometheus metrics
+      security: []
+      responses:
+        '200':
+          description: Prometheus metrics
+          content:
+            text/plain:
+              schema:
+                type: string 

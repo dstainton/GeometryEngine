@@ -1,0 +1,51 @@
+# Rust build directory
+/target/
+
+# Rust generated files
+**/*.rs.bk
+Cargo.lock
+
+# IDE specific files
+.vscode/*
+!.vscode/launch.json
+!.vscode/tasks.json
+.idea/
+*.iml
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Docker volumes
+postgres_data/
+redis_data/
+
+# Debug files
+*.pdb
+
+# Log files
+*.log
+
+# OS specific files
+.DS_Store
+Thumbs.db
+
+# Test coverage reports
+coverage/
+*.profraw
+
+# Documentation
+/doc/
+/target/doc/
+
+# Backup files
+*.bak
+*.swp
+*~
+
+# Build artifacts
+*.o
+*.so
+*.dylib
+*.dll 

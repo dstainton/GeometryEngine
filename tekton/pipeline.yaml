@@ -1,0 +1,61 @@
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: build-and-deploy
+spec:
+  workspaces:
+    - name: shared-workspace
+  params:
+    - name: git-url
+      type: string
+    - name: git-revision
+      type: string
+    - name: IMAGE
+      type: string
+  tasks:
+    - name: fetch-repository
+      taskRef:
+        name: git-clone
+      workspaces:
+        - name: output
+          workspace: shared-workspace
+      params:
+        - name: url
+          value: $(params.git-url)
+        - name: revision
+          value: $(params.git-revision)
+        
+    - name: run-tests
+      taskRef:
+        name: cargo-test
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+      runAfter:
+        - fetch-repository
+        
+    - name: build-image
+      taskRef:
+        name: buildah
+      params:
+        - name: IMAGE
+          value: $(params.IMAGE)
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+      runAfter:
+        - run-tests
+        
+    - name: deploy
+      taskRef:
+        name: helm-upgrade-from-source
+      params:
+        - name: release_name
+          value: geospatial-api
+        - name: chart_path
+          value: ./helm/geospatial-api
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+      runAfter:
+        - build-image 

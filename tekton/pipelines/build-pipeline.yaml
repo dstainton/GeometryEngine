@@ -1,0 +1,74 @@
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: geospatial-api-pipeline
+spec:
+  workspaces:
+    - name: shared-workspace
+    - name: dockerconfig
+  timeouts:
+    pipeline: "1h"
+    tasks: "30m"
+  params:
+    - name: git-url
+    - name: git-revision
+    - name: image-name
+    - name: image-tag
+  tasks:
+    - name: fetch-source
+      retries: 2
+      taskRef:
+        name: git-clone
+      workspaces:
+        - name: output
+          workspace: shared-workspace
+      params:
+        - name: url
+          value: $(params.git-url)
+        - name: revision
+          value: $(params.git-revision)
+
+    - name: run-tests
+      runAfter: ["fetch-source"]
+      taskRef:
+        name: cargo-test
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+
+    - name: security-scan
+      runAfter: ["fetch-source"]
+      taskRef:
+        name: security-scanner
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+
+    - name: vulnerability-scan
+      runAfter: ["fetch-source"]
+      taskRef:
+        name: vulnerability-scan
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+
+    - name: code-coverage
+      runAfter: ["run-tests"]
+      taskRef:
+        name: code-coverage
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+
+    - name: build-image
+      runAfter: ["run-tests", "security-scan", "vulnerability-scan", "code-coverage"]
+      taskRef:
+        name: buildah
+      workspaces:
+        - name: source
+          workspace: shared-workspace
+        - name: dockerconfig
+          workspace: dockerconfig
+      params:
+        - name: IMAGE
+          value: $(params.image-name):$(params.image-tag) 

@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgis/postgis:15-3.3
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: geospatial_test
+        ports:
+          - 5432:5432
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+    steps:
+    - uses: actions/checkout@v3
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
+        components: rustfmt, clippy
+    - name: Check formatting
+      run: cargo fmt -- --check
+    - name: Clippy
+      run: cargo clippy -- -D warnings
+    - name: Run tests
+      run: cargo test
+      env:
+        POSTGRES_HOST: localhost
+        POSTGRES_PASSWORD: postgres
+        REDIS_URL: redis://localhost:6379
+        MASTER_API_KEY: test-master-key
+    - name: Security audit
+      run: |
+        cargo install cargo-audit
+        cargo audit
+    - name: Coverage
+      run: |
+        cargo install cargo-tarpaulin
+        cargo tarpaulin --out Xml
+    - name: Upload coverage
+      uses: codecov/codecov-action@v3 

@@ -1,0 +1,24 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: code-coverage
+spec:
+  workspaces:
+    - name: source
+  steps:
+    - name: coverage
+      image: rust:1.68
+      workingDir: $(workspaces.source.path)
+      resources:
+        requests:
+          memory: "2Gi"
+          cpu: "1"
+        limits:
+          memory: "4Gi"
+          cpu: "2"
+      securityContext:
+        runAsNonRoot: true
+        allowPrivilegeEscalation: false
+      script: |
+        cargo install cargo-tarpaulin
+        cargo tarpaulin --out Xml --output-dir coverage 

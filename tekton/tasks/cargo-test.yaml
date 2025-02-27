@@ -1,0 +1,23 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: cargo-test
+spec:
+  workspaces:
+    - name: source
+  steps:
+    - name: test
+      image: rust:1.68
+      workingDir: $(workspaces.source.path)
+      resources:
+        requests:
+          memory: "2Gi"
+          cpu: "1"
+        limits:
+          memory: "4Gi"
+          cpu: "2"
+      securityContext:
+        runAsNonRoot: true
+        allowPrivilegeEscalation: false
+      script: |
+        cargo test --all-features 

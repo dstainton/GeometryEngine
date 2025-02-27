@@ -1,0 +1,19 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: helm-upgrade-from-source
+spec:
+  workspaces:
+    - name: source
+  params:
+    - name: release_name
+      type: string
+    - name: chart_path
+      type: string
+  steps:
+    - name: helm-upgrade
+      image: alpine/helm:3.11.1
+      workingDir: $(workspaces.source.path)
+      script: |
+        helm dependency update $(params.chart_path)
+        helm upgrade --install $(params.release_name) $(params.chart_path) 

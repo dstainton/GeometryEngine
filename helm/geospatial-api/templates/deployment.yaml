@@ -1,0 +1,113 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "geospatial-api.fullname" . }}
+  labels:
+    {{- include "geospatial-api.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "geospatial-api.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "geospatial-api.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "geospatial-api.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      initContainers:
+        - name: init-db
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          command: ['sh', '-c', 'until pg_isready -h $POSTGRES_HOST -p $POSTGRES_PORT; do echo waiting for database; sleep 2; done;']
+          env:
+            - name: POSTGRES_HOST
+              value: {{ include "geospatial-api.postgresql.fullname" . }}
+            - name: POSTGRES_PORT
+              value: "5432"
+        - name: init-redis
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          command: ['sh', '-c', 'until redis-cli -h {{ include "geospatial-api.redis.fullname" . }} -a $REDIS_PASSWORD ping; do echo waiting for redis; sleep 2; done;']
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "geospatial-api.redis.secretName" . }}
+                  key: redis-password
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          env:
+            - name: POSTGRES_HOST
+              value: {{ include "geospatial-api.postgresql.fullname" . }}
+            - name: POSTGRES_PORT
+              value: "5432"
+            - name: POSTGRES_DB
+              value: {{ .Values.postgresql.auth.database }}
+            - name: POSTGRES_USER
+              value: postgres
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "geospatial-api.postgresql.secretName" . }}
+                  key: postgres-password
+            - name: REDIS_URL
+              value: redis://:$(REDIS_PASSWORD)@{{ include "geospatial-api.redis.fullname" . }}:6379
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "geospatial-api.redis.secretName" . }}
+                  key: redis-password
+            - name: MASTER_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "geospatial-api.fullname" . }}
+                  key: master-api-key
+            - name: RATE_LIMIT_PER_MINUTE
+              value: {{ .Values.rateLimitPerMinute | quote }}
+          ports:
+            - containerPort: 8080
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /health-check
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            successThreshold: 1
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /readiness-check
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            successThreshold: 1
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: /health-check
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 30
+          volumeMounts:
+            - name: config
+              mountPath: /etc/geospatial-api
+              readOnly: true
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 10"]
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "geospatial-api.fullname" . }} 

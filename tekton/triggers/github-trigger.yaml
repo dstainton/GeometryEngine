@@ -1,0 +1,54 @@
+apiVersion: triggers.tekton.dev/v1alpha1
+kind: TriggerTemplate
+metadata:
+  name: geospatial-api-trigger
+spec:
+  params:
+    - name: gitrevision
+      description: "Git revision to build"
+      default: "main"
+    - name: gitrepositoryurl
+      description: "Git repository URL"
+    - name: results-bucket
+      description: "Storage bucket for build results"
+      default: "build-results"
+  serviceAccountName: tekton-triggers-sa
+  podSecurityContext:
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+  resourcetemplates:
+    - apiVersion: tekton.dev/v1beta1
+      kind: PipelineRun
+      metadata:
+        generateName: geospatial-build-
+        annotations:
+          tekton.dev/pipelines.minVersion: "0.17.0"
+          build.tekton.dev/save-results: "true"
+      spec:
+        pipelineRef:
+          name: geospatial-api-pipeline
+        workspaces:
+          - name: shared-workspace
+            volumeClaimTemplate:
+              spec:
+                accessModes:
+                  - ReadWriteOnce
+                resources:
+                  requests:
+                    storage: 1Gi
+          - name: dockerconfig
+            secret:
+              secretName: docker-config
+          - name: results
+            persistentVolumeClaim:
+              claimName: build-results-pvc
+        params:
+          - name: git-url
+            value: $(tt.params.gitrepositoryurl)
+          - name: git-revision
+            value: $(tt.params.gitrevision)
+          - name: image-name
+            value: geospatial-api
+          - name: image-tag
+            value: $(tt.params.gitrevision) 

@@ -1,0 +1,16 @@
+FROM rust:1.81
+
+WORKDIR /usr/src/app
+
+RUN apt-get update && apt-get install -y \
+    postgresql-client \
+    libpq5 \
+    redis-tools \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install cargo-watch for development
+RUN cargo install --locked cargo-watch
+
+COPY . .
+
+CMD ["cargo", "watch", "-x", "run"] 

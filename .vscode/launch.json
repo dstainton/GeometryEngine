@@ -1,0 +1,66 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug Geospatial API",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=geospatial-api",
+                    "--package=geospatial-api"
+                ],
+                "filter": {
+                    "name": "geospatial-api",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "RUST_LOG": "debug",
+                "POSTGRES_HOST": "localhost",
+                "POSTGRES_PORT": "5432",
+                "POSTGRES_DB": "geospatial",
+                "POSTGRES_USER": "postgres",
+                "POSTGRES_PASSWORD": "development",
+                "REDIS_URL": "redis://localhost:6379",
+                "MASTER_API_KEY": "dev-master-key"
+            },
+            "preLaunchTask": "cargo build"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug Unit Tests",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=geospatial-api",
+                    "--package=geospatial-api"
+                ],
+                "filter": {
+                    "name": "geospatial-api",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "env": {
+                "RUST_LOG": "debug",
+                "POSTGRES_HOST": "localhost",
+                "POSTGRES_PORT": "5432",
+                "POSTGRES_DB": "geospatial_test",
+                "POSTGRES_USER": "postgres",
+                "POSTGRES_PASSWORD": "development",
+                "REDIS_URL": "redis://localhost:6379",
+                "MASTER_API_KEY": "test-master-key"
+            }
+        }
+    ]
+}

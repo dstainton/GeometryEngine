@@ -1,0 +1,16 @@
+{{- if .Values.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "geospatial-api.fullname" . }}
+  labels:
+    {{- include "geospatial-api.labels" . | nindent 4 }}
+spec:
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 30s
+  selector:
+    matchLabels:
+      {{- include "geospatial-api.selectorLabels" . | nindent 6 }}
+{{- end }} 

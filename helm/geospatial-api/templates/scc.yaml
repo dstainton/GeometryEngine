@@ -1,0 +1,24 @@
+apiVersion: security.openshift.io/v1
+kind: SecurityContextConstraints
+metadata:
+  name: {{ include "geospatial-api.fullname" . }}
+allowPrivilegeEscalation: false
+allowPrivilegedContainer: false
+runAsUser:
+  type: MustRunAsRange
+  uidRangeMin: 1000
+  uidRangeMax: 1000
+seLinuxContext:
+  type: MustRunAs
+fsGroup:
+  type: MustRunAs
+  ranges:
+  - min: 1000
+    max: 1000
+volumes:
+- configMap
+- emptyDir
+- persistentVolumeClaim
+- secret
+users:
+- system:serviceaccount:{{ .Release.Namespace }}:{{ include "geospatial-api.serviceAccountName" . }} 
