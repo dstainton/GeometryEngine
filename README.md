@@ -2,6 +2,8 @@
 
 A high-performance, scalable REST API for geospatial data management built with Rust and PostGIS.
 
+Built completely using prompting in Cursor. The only manual edit was this line of text.
+
 ## Features
 
 - 🗺️ Full GeoJSON support with PostGIS integration
