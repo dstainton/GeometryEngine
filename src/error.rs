@@ -1,27 +1,28 @@
 use thiserror::Error;
 use actix_web::{ResponseError, HttpResponse};
 use serde_json::json;
-use deadpool_postgres::PoolError;
+use deadpool_postgres::{PoolError, CreatePoolError};
 use tokio_postgres::Error as PgError;
 use redis::RedisError;
-use deadpool_postgres::CreatePoolError;
 use prometheus;
+use utoipa::ToSchema;
+use serde::Serialize;
 
-#[derive(Error, Debug)]
+#[derive(Error, Debug, ToSchema, Serialize)]
 pub enum ApiError {
     // Database-related errors
     #[error("Database error: {0}")]
-    Database(#[from] PgError),
+    Database(String),
     
     #[error("Pool error: {0}")]
-    Pool(#[from] PoolError),
+    Pool(String),
     
     #[error("Failed to create connection pool: {0}")]
-    CreatePool(CreatePoolError),
+    CreatePool(String),
     
     // Cache-related errors
     #[error("Cache error: {0}")]
-    Cache(#[from] RedisError),
+    Cache(String),
     
     // Authentication and authorization errors
     #[error("Invalid API key")]
@@ -60,7 +61,40 @@ pub enum ApiError {
     
     // Serialization errors
     #[error("JSON error: {0}")]
-    Json(#[from] serde_json::Error),
+    Json(String),
+    
+    #[error("Invalid query: {0}")]
+    InvalidQuery(String),
+}
+
+impl From<PgError> for ApiError {
+    fn from(err: PgError) -> Self {
+        ApiError::Database(err.to_string())
+    }
+}
+
+impl From<PoolError> for ApiError {
+    fn from(err: PoolError) -> Self {
+        ApiError::Pool(err.to_string())
+    }
+}
+
+impl From<CreatePoolError> for ApiError {
+    fn from(err: CreatePoolError) -> Self {
+        ApiError::CreatePool(err.to_string())
+    }
+}
+
+impl From<RedisError> for ApiError {
+    fn from(err: RedisError) -> Self {
+        ApiError::Cache(err.to_string())
+    }
+}
+
+impl From<serde_json::Error> for ApiError {
+    fn from(err: serde_json::Error) -> Self {
+        ApiError::Json(err.to_string())
+    }
 }
 
 impl ResponseError for ApiError {

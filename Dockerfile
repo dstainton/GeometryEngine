@@ -4,8 +4,18 @@ WORKDIR /usr/src/app
 COPY . .
 RUN cargo build --release
 
-FROM debian:bullseye-slim
+FROM debian:bookworm-slim
 
+# Create required directories and set permissions
+RUN set -eux; \
+    mkdir -p /var/lib/apt/lists/partial; \
+    mkdir -p /var/cache/apt/archives/partial; \
+    mkdir -p /var/log/apt; \
+    chmod -R 777 /var/lib/apt/lists; \
+    chmod -R 777 /var/cache/apt; \
+    chmod -R 777 /var/log/apt
+
+# Install required packages
 RUN apt-get update && apt-get install -y \
     postgresql-client \
     libpq5 \

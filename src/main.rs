@@ -1,6 +1,6 @@
 use actix_web::{web, App, HttpServer, HttpResponse, HttpRequest};
 use actix_web::dev::Payload;
-use crate::models::{Dataset, Feature, SpatialQuery, CreateApiKeyRequest};
+use crate::models::{Dataset, Feature, SpatialQuery, CreateApiKeyRequest, AttributeQuery};
 use crate::error::ApiError;
 use std::time::Duration;
 use serde_json::json;
@@ -8,6 +8,10 @@ use actix_web::FromRequest;
 use futures::future::{ready, Ready};
 use crate::rate_limit::RateLimiter;
 use std::env;
+use utoipa::{OpenApi, Modify};
+use utoipa::openapi::security::{SecurityScheme, HttpAuthScheme, HttpBuilder};
+use utoipa_swagger_ui::SwaggerUi;
+use log::error;
 
 mod models;
 mod db;
@@ -36,6 +40,89 @@ impl FromRequest for ApiKey {
     }
 }
 
+// Add documentation for the health check endpoint
+/// Check API health status
+#[utoipa::path(
+    get,
+    path = "/health-check",
+    responses(
+        (status = 200, description = "API is healthy"),
+        (status = 503, description = "API is unhealthy", body = ApiError)
+    ),
+    tag = "health"
+)]
+async fn health_check() -> HttpResponse {
+    HttpResponse::Ok().finish()
+}
+
+// Add documentation for readiness check
+/// Check if API and its dependencies are ready
+#[utoipa::path(
+    get,
+    path = "/readiness-check",
+    responses(
+        (status = 200, description = "API is ready"),
+        (status = 503, description = "API is not ready", body = ApiError)
+    ),
+    tag = "health"
+)]
+async fn readiness_check(
+    db: web::Data<db::Database>,
+    cache: web::Data<cache::Cache>
+) -> Result<HttpResponse, ApiError> {
+    // Check DB connection
+    db.check_connection().await?;
+    
+    // Check Redis connection
+    cache.check_connection().await?;
+    
+    Ok(HttpResponse::Ok().finish())
+}
+
+// Add documentation for store feature endpoint
+/// Store a new feature in a dataset
+#[utoipa::path(
+    post,
+    path = "/api/v1/datasets/{dataset_name}/features",
+    request_body(
+        content = Feature,
+        example = json!({
+            "feature_id": "building_123",
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[
+                    [-122.4194, 37.7749],
+                    [-122.4195, 37.7749],
+                    [-122.4195, 37.7750],
+                    [-122.4194, 37.7750],
+                    [-122.4194, 37.7749]
+                ]]
+            },
+            "attributes": {
+                "name": "Ferry Building",
+                "height": 75.0,
+                "year_built": 1898,
+                "use_type": "commercial",
+                "floors": 4,
+                "historic": true
+            },
+            "input_srid": 4326
+        })
+    ),
+    responses(
+        (status = 201, description = "Feature created successfully",
+         example = json!({
+             "id": "123e4567-e89b-12d3-a456-426614174000",
+             "feature_id": "building_123",
+             "dataset_id": "123e4567-e89b-12d3-a456-426614174001"
+         })
+        ),
+        (status = 400, description = "Invalid feature data", body = ApiError),
+        (status = 401, description = "Invalid API key", body = ApiError),
+        (status = 429, description = "Rate limit exceeded", body = ApiError)
+    ),
+    tag = "features"
+)]
 async fn store_feature(
     api_key: ApiKey,
     dataset_name: web::Path<String>,
@@ -65,6 +152,25 @@ async fn store_feature(
     Ok(HttpResponse::Created().json(feature_id))
 }
 
+/// Update an existing feature in a dataset
+#[utoipa::path(
+    put,
+    path = "/api/v1/datasets/{dataset_name}/features/{feature_id}",
+    request_body = Feature,
+    params(
+        ("dataset_name" = String, Path, description = "Name of the dataset"),
+        ("feature_id" = String, Path, description = "ID of the feature to update"),
+        ("X-API-Key" = String, Header, description = "API key for authentication")
+    ),
+    responses(
+        (status = 200, description = "Feature updated successfully"),
+        (status = 400, description = "Invalid feature data", body = ApiError),
+        (status = 401, description = "Invalid API key", body = ApiError),
+        (status = 404, description = "Feature not found", body = ApiError),
+        (status = 429, description = "Rate limit exceeded", body = ApiError)
+    ),
+    tag = "features"
+)]
 async fn update_feature(
     api_key: ApiKey,
     path: web::Path<(String, String)>,
@@ -95,6 +201,40 @@ async fn update_feature(
     Ok(HttpResponse::Ok().finish())
 }
 
+/// Perform a spatial query on features
+#[utoipa::path(
+    post,
+    path = "/api/v1/spatial-query",
+    request_body(
+        content = SpatialQuery,
+        example = json!({
+            "operation": "intersects",
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[
+                    [-122.4, 37.7],
+                    [-122.4, 37.8],
+                    [-122.3, 37.8],
+                    [-122.3, 37.7],
+                    [-122.4, 37.7]
+                ]]
+            },
+            "dataset_name": "my_dataset",
+            "input_srid": 4326,
+            "output_srid": 4326
+        })
+    ),
+    params(
+        ("X-API-Key" = String, Header, description = "API key for authentication")
+    ),
+    responses(
+        (status = 200, description = "Query results", body = Vec<Feature>),
+        (status = 400, description = "Invalid query parameters", body = ApiError),
+        (status = 401, description = "Invalid API key", body = ApiError),
+        (status = 429, description = "Rate limit exceeded", body = ApiError)
+    ),
+    tag = "spatial"
+)]
 async fn spatial_query(
     api_key: ApiKey,
     query: web::Json<SpatialQuery>,
@@ -123,6 +263,39 @@ async fn spatial_query(
     Ok(HttpResponse::Ok().json(results))
 }
 
+/// Create a new dataset
+#[utoipa::path(
+    post,
+    path = "/api/v1/datasets",
+    request_body(
+        content = Dataset,
+        example = json!({
+            "name": "san_francisco_buildings",
+            "description": "Building footprints in San Francisco",
+            "metadata": {
+                "source": "City of San Francisco",
+                "last_updated": "2024-02-27",
+                "crs": "EPSG:4326"
+            }
+        })
+    ),
+    params(
+        ("X-API-Key" = String, Header, description = "API key for authentication")
+    ),
+    responses(
+        (status = 201, description = "Dataset created successfully",
+         example = json!({
+             "id": "123e4567-e89b-12d3-a456-426614174000",
+             "name": "san_francisco_buildings",
+             "api_key": "dataset_key_123"
+         })
+        ),
+        (status = 401, description = "Invalid API key", body = ApiError),
+        (status = 409, description = "Dataset already exists", body = ApiError),
+        (status = 429, description = "Rate limit exceeded", body = ApiError)
+    ),
+    tag = "datasets"
+)]
 async fn create_dataset(
     api_key: ApiKey,
     dataset: web::Json<Dataset>,
@@ -139,6 +312,20 @@ async fn create_dataset(
     Ok(HttpResponse::Created().json(dataset.0))
 }
 
+/// List all datasets accessible with the provided API key
+#[utoipa::path(
+    get,
+    path = "/api/v1/datasets",
+    params(
+        ("X-API-Key" = String, Header, description = "API key for authentication")
+    ),
+    responses(
+        (status = 200, description = "List of datasets", body = Vec<Dataset>),
+        (status = 401, description = "Invalid API key", body = ApiError),
+        (status = 429, description = "Rate limit exceeded", body = ApiError)
+    ),
+    tag = "datasets"
+)]
 async fn list_datasets(
     api_key: ApiKey,
     db: web::Data<db::Database>,
@@ -154,6 +341,32 @@ async fn list_datasets(
     Ok(HttpResponse::Ok().json(datasets))
 }
 
+/// Create a new API key
+#[utoipa::path(
+    post,
+    path = "/api/v1/api-keys",
+    request_body(
+        content = CreateApiKeyRequest,
+        example = json!({
+            "new_key": "user_key_123",
+            "key_expires_in_seconds": 2592000,  // 30 days
+            "data_expires_in_seconds": 3600     // 1 hour
+        })
+    ),
+    responses(
+        (status = 201, description = "API key created successfully",
+         example = json!({
+             "key": "user_key_123",
+             "key_expires_in_seconds": 2592000,
+             "data_expires_in_seconds": 3600,
+             "created_at": "2024-02-27T15:00:00Z"
+         })
+        ),
+        (status = 401, description = "Invalid master API key", body = ApiError),
+        (status = 429, description = "Rate limit exceeded", body = ApiError)
+    ),
+    tag = "api-keys"
+)]
 async fn create_api_key(
     master_key: ApiKey,
     request: web::Json<CreateApiKeyRequest>,
@@ -179,13 +392,47 @@ async fn create_api_key(
 async fn run_cleanup_task(db: db::Database) {
     let cleanup_interval = Duration::from_secs(3600); // Run cleanup every hour
     loop {
-        tokio::time::sleep(cleanup_interval).await;
         if let Err(e) = db.cleanup_expired_keys().await {
-            log::error!("Error during cleanup: {}", e);
+            error!("Failed to cleanup expired keys: ({:?})", e);
         }
+        tokio::time::sleep(cleanup_interval).await;
     }
 }
 
+// Add documentation for get feature endpoint
+/// Get a feature by ID from a dataset
+#[utoipa::path(
+    get,
+    path = "/api/v1/datasets/{dataset_name}/features/{feature_id}",
+    params(
+        ("dataset_name" = String, Path, description = "Name of the dataset"),
+        ("feature_id" = String, Path, description = "ID of the feature"),
+        ("X-API-Key" = String, Header, description = "API key for authentication")
+    ),
+    responses(
+        (status = 200, description = "Feature found", body = Feature,
+         example = json!({
+             "id": "123e4567-e89b-12d3-a456-426614174000",
+             "dataset_id": "123e4567-e89b-12d3-a456-426614174001",
+             "feature_id": "building_123",
+             "geometry": {
+                 "type": "Point",
+                 "coordinates": [-122.4194, 37.7749]
+             },
+             "attributes": {
+                 "name": "Ferry Building",
+                 "height": 75.0,
+                 "year_built": 1898
+             },
+             "input_srid": 4326
+         })
+        ),
+        (status = 401, description = "Invalid API key", body = ApiError),
+        (status = 404, description = "Feature not found", body = ApiError),
+        (status = 429, description = "Rate limit exceeded", body = ApiError)
+    ),
+    tag = "features"
+)]
 async fn get_feature(
     api_key: ApiKey,
     path: web::Path<(String, String)>,
@@ -218,21 +465,171 @@ async fn get_feature(
     Ok(HttpResponse::Ok().json(feature))
 }
 
-async fn health_check() -> HttpResponse {
-    HttpResponse::Ok().finish()
+/// Query features by attributes
+#[utoipa::path(
+    post,
+    path = "/api/v1/attribute-query",
+    request_body(
+        content = AttributeQuery,
+        example = json!({
+            "dataset_name": "san_francisco_buildings",
+            "conditions": {
+                "height": { "gt": 50 },
+                "year_built": { "lt": 1950 },
+                "use_type": { "eq": "commercial" },
+                "historic": { "eq": true }
+            }
+        })
+    ),
+    responses(
+        (status = 200, description = "Query results",
+         example = json!([
+             {
+                 "id": "123e4567-e89b-12d3-a456-426614174000",
+                 "feature_id": "building_123",
+                 "geometry": {
+                     "type": "Point",
+                     "coordinates": [-122.4194, 37.7749]
+                 },
+                 "attributes": {
+                     "name": "Ferry Building",
+                     "height": 75.0,
+                     "year_built": 1898
+                 }
+             }
+         ])
+        ),
+        (status = 400, description = "Invalid query parameters", body = ApiError),
+        (status = 401, description = "Invalid API key", body = ApiError),
+        (status = 429, description = "Rate limit exceeded", body = ApiError)
+    ),
+    tag = "attributes"
+)]
+async fn attribute_query(
+    api_key: ApiKey,
+    query: web::Json<AttributeQuery>,
+    db: web::Data<db::Database>,
+    cache: web::Data<cache::Cache>,
+    rate_limiter: web::Data<RateLimiter>,
+) -> Result<HttpResponse, ApiError> {
+    rate_limiter.check_rate_limit(api_key.0.as_str()).await?;
+    // Validate API key
+    if !db.validate_api_key(api_key.0.as_str()).await? {
+        return Err(ApiError::InvalidApiKey);
+    }
+
+    // Perform attribute query
+    let results = db.attribute_query(&query).await?;
+
+    // Cache results for each feature
+    for feature in &results {
+        cache.set_feature(&query.dataset_name, feature).await?;
+    }
+
+    Ok(HttpResponse::Ok().json(results))
 }
 
-async fn readiness_check(
-    db: web::Data<db::Database>,
-    cache: web::Data<cache::Cache>
-) -> Result<HttpResponse, ApiError> {
-    // Check DB connection
-    db.check_connection().await?;
-    
-    // Check Redis connection
-    cache.check_connection().await?;
-    
-    Ok(HttpResponse::Ok().finish())
+// Generate API documentation
+#[derive(OpenApi)]
+#[openapi(
+    paths(
+        health_check,
+        readiness_check,
+        create_api_key,
+        create_dataset,
+        list_datasets,
+        store_feature,
+        update_feature,
+        get_feature,
+        spatial_query,
+        attribute_query
+    ),
+    components(
+        schemas(Feature, Dataset, SpatialQuery, CreateApiKeyRequest, ApiError, AttributeQuery)
+    ),
+    modifiers(&SecurityAddon),
+    tags(
+        (name = "health", description = "Health check endpoints"),
+        (name = "api-keys", description = "API key management"),
+        (name = "datasets", description = "Dataset operations"),
+        (name = "features", description = "Feature operations"),
+        (name = "spatial", description = "Spatial queries"),
+        (name = "attributes", description = "Attribute-based queries")
+    ),
+    info(
+        title = "Geospatial API",
+        version = "1.0.0",
+        description = "High-performance REST API for geospatial data management",
+        license(
+            name = "MIT",
+            url = "https://opensource.org/licenses/MIT"
+        ),
+        contact(
+            name = "API Support",
+            email = "support@yourdomain.com",
+            url = "https://api.yourdomain.com/support"
+        )
+    ),
+    servers(
+        (url = "http://localhost:8080", description = "Development server"),
+        (url = "https://api.yourdomain.com", description = "Production server")
+    ),
+    external_docs(
+        url = "https://api.yourdomain.com/docs",
+        description = "Additional documentation"
+    )
+)]
+struct ApiDoc;
+
+struct SecurityAddon;
+
+impl Modify for SecurityAddon {
+    fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
+        if let Some(components) = openapi.components.as_mut() {
+            components.add_security_scheme(
+                "api_key",
+                SecurityScheme::Http(
+                    HttpBuilder::new()
+                        .scheme(HttpAuthScheme::Bearer)
+                        .bearer_format("API Key")
+                        .description(Some("API key for authentication"))
+                        .build()
+                )
+            );
+            components.add_security_scheme(
+                "master_key",
+                SecurityScheme::Http(
+                    HttpBuilder::new()
+                        .scheme(HttpAuthScheme::Bearer)
+                        .bearer_format("Master API Key")
+                        .description(Some("Master API key for administrative operations"))
+                        .build()
+                )
+            );
+        }
+        
+        // Add security requirement for all operations except health check
+        for (path, item) in openapi.paths.paths.iter_mut() {
+            if !path.contains("health-check") {
+                let security = if path.contains("api-keys") {
+                    vec![utoipa::openapi::security::SecurityRequirement::new(
+                        "master_key".to_string(),
+                        Vec::<String>::new()
+                    )]
+                } else {
+                    vec![utoipa::openapi::security::SecurityRequirement::new(
+                        "api_key".to_string(),
+                        Vec::<String>::new()
+                    )]
+                };
+                
+                if let Some(op) = item.operations.get_mut(&utoipa::openapi::PathItemType::Get) { op.security = Some(security.clone()); }
+                if let Some(op) = item.operations.get_mut(&utoipa::openapi::PathItemType::Post) { op.security = Some(security.clone()); }
+                if let Some(op) = item.operations.get_mut(&utoipa::openapi::PathItemType::Put) { op.security = Some(security.clone()); }
+                if let Some(op) = item.operations.get_mut(&utoipa::openapi::PathItemType::Delete) { op.security = Some(security.clone()); }
+            }
+        }
+    }
 }
 
 #[actix_web::main]
@@ -272,6 +669,11 @@ async fn main() -> std::io::Result<()> {
             .app_data(web::Data::new(db.clone()))
             .app_data(web::Data::new(cache.clone()))
             .app_data(rate_limiter.clone())
+            // Add Swagger UI
+            .service(
+                SwaggerUi::new("/swagger-ui/{_:.*}")
+                    .url("/api-docs/openapi.json", ApiDoc::openapi())
+            )
             .service(
                 web::scope("/api/v1")
                     .route("/api-keys", web::post().to(create_api_key))
@@ -281,6 +683,7 @@ async fn main() -> std::io::Result<()> {
                     .route("/datasets/{dataset_name}/features/{feature_id}", web::put().to(update_feature))
                     .route("/spatial-query", web::post().to(spatial_query))
                     .route("/datasets/{dataset_name}/features/{feature_id}", web::get().to(get_feature))
+                    .route("/attribute-query", web::post().to(attribute_query))
                     .route("/health-check", web::get().to(health_check))
                     .route("/readiness-check", web::get().to(readiness_check))
             )

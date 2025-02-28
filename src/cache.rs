@@ -13,7 +13,7 @@ pub struct Cache {
 impl Cache {
     pub fn new() -> Result<Self, ApiError> {
         let redis_url = env::var("REDIS_URL").expect("REDIS_URL must be set");
-        let client = Client::open(redis_url).map_err(ApiError::Cache)?;
+        let client = Client::open(redis_url).map_err(|e| ApiError::Cache(e.to_string()))?;
         Ok(Self { client })
     }
 
@@ -22,29 +22,29 @@ impl Cache {
     }
 
     pub async fn get_feature(&self, dataset_name: &str, feature_id: &str) -> Result<Option<Feature>, ApiError> {
-        let mut conn = self.client.get_async_connection().await.map_err(ApiError::Cache)?;
+        let mut conn = self.client.get_async_connection().await.map_err(|e| ApiError::Cache(e.to_string()))?;
         let key = Self::cache_key(dataset_name, feature_id);
         
         let data: RedisResult<Option<String>> = conn.get(&key).await;
-        let data = data.map_err(ApiError::Cache)?;
+        let data = data.map_err(|e| ApiError::Cache(e.to_string()))?;
         
         match data {
-            Some(json) => serde_json::from_str(&json).map(Some).map_err(ApiError::Json),
+            Some(json) => serde_json::from_str(&json).map(Some).map_err(|e| ApiError::Json(e.to_string())),
             None => Ok(None),
         }
     }
 
     pub async fn set_feature(&self, dataset_name: &str, feature: &Feature) -> Result<(), ApiError> {
-        let mut conn = self.client.get_async_connection().await.map_err(ApiError::Cache)?;
+        let mut conn = self.client.get_async_connection().await.map_err(|e| ApiError::Cache(e.to_string()))?;
         let key = Self::cache_key(dataset_name, &feature.feature_id);
-        let json = serde_json::to_string(feature).map_err(ApiError::Json)?;
+        let json = serde_json::to_string(feature).map_err(|e| ApiError::Json(e.to_string()))?;
         
         let _: RedisResult<()> = conn.set_ex(&key, json, 3600).await;
         Ok(())
     }
 
     pub async fn invalidate_feature(&self, dataset_name: &str, feature_id: &str) -> Result<(), ApiError> {
-        let mut conn = self.client.get_async_connection().await.map_err(ApiError::Cache)?;
+        let mut conn = self.client.get_async_connection().await.map_err(|e| ApiError::Cache(e.to_string()))?;
         let key = Self::cache_key(dataset_name, feature_id);
         
         let _: RedisResult<()> = conn.del(&key).await;
@@ -52,7 +52,7 @@ impl Cache {
     }
 
     pub async fn get_connection(&self) -> Result<redis::aio::Connection, ApiError> {
-        self.client.get_async_connection().await.map_err(ApiError::Cache)
+        self.client.get_async_connection().await.map_err(|e| ApiError::Cache(e.to_string()))
     }
 
     pub async fn check_connection(&self) -> Result<(), ApiError> {
@@ -60,7 +60,7 @@ impl Cache {
         let _: () = redis::cmd("PING")
             .query_async(&mut conn)
             .await
-            .map_err(ApiError::Cache)?;
+            .map_err(|e| ApiError::Cache(e.to_string()))?;
         Ok(())
     }
 } 

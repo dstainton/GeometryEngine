@@ -285,6 +285,11 @@ make test
 # Build and deploy
 make build
 make deploy
+
+### API Documentation
+The API documentation is available through Swagger UI at:
+```
+http://localhost:8080/swagger-ui
 ```
 
 ### Available Make Commands

@@ -19,7 +19,7 @@ impl RateLimiter {
         let mut conn = self.cache.get_connection().await?;
         let key = format!("rate_limit:{}", api_key);
 
-        let count: Option<u32> = conn.get(&key).await.map_err(ApiError::Cache)?;
+        let count: Option<u32> = conn.get(&key).await.map_err(|e| ApiError::Cache(e.to_string()))?;
         let current = count.unwrap_or(0);
 
         if current >= self.requests_per_minute {
@@ -27,8 +27,8 @@ impl RateLimiter {
         }
 
         // Increment counter and set expiry
-        let _: () = conn.incr(&key, 1).await.map_err(ApiError::Cache)?;
-        let _: () = conn.expire(&key, 60).await.map_err(ApiError::Cache)?;
+        let _: () = conn.incr(&key, 1).await.map_err(|e| ApiError::Cache(e.to_string()))?;
+        let _: () = conn.expire(&key, 60).await.map_err(|e| ApiError::Cache(e.to_string()))?;
 
         Ok(())
     }

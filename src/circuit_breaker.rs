@@ -2,6 +2,7 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
+use std::future::Future;
 
 #[derive(Debug)]
 pub struct CircuitBreaker {

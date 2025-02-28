@@ -1,4 +1,4 @@
-use crate::models::{Dataset, Feature, SpatialQuery};
+use crate::models::{Dataset, Feature, SpatialQuery, AttributeQuery};
 use crate::error::ApiError;
 use deadpool_postgres::{Pool, Config, Runtime};
 use tokio_postgres::NoTls;
@@ -27,7 +27,7 @@ impl Database {
         cfg.password = Some(env::var("POSTGRES_PASSWORD").unwrap_or_default());
 
         let pool = cfg.create_pool(Some(Runtime::Tokio1), NoTls)
-            .map_err(ApiError::CreatePool)?;
+            .map_err(|e| ApiError::CreatePool(e.to_string()))?;
         Ok(Self { pool })
     }
 
@@ -435,6 +435,78 @@ impl Database {
         let client = self.pool.get().await?;
         client.execute("SELECT 1", &[]).await?;
         Ok(())
+    }
+
+    pub async fn attribute_query(&self, query: &AttributeQuery) -> Result<Vec<Feature>, ApiError> {
+        let client = self.pool.get().await?;
+        
+        // Build the SQL query dynamically based on conditions
+        let mut sql = String::from(
+            "SELECT f.id, f.dataset_id, f.feature_id, ST_AsGeoJSON(f.geometry) as geometry, f.attributes, d.api_key 
+             FROM features f
+             JOIN datasets d ON f.dataset_id = d.id
+             WHERE d.name = $1"
+        );
+        
+        let mut params: Vec<&(dyn tokio_postgres::types::ToSql + Sync)> = vec![&query.dataset_name];
+        let mut conditions = Vec::new();
+
+        // Process each condition in the query
+        if let Some(obj) = query.conditions.as_object() {
+            for (field, operators) in obj {
+                if let Some(ops) = operators.as_object() {
+                    for (op, value) in ops {
+                        let condition = match op.as_str() {
+                            "eq" => format!("attributes->>'{}' = ${}", field, params.len() + 1),
+                            "gt" => format!("(attributes->>'{}'::text)::numeric > ${}", field, params.len() + 1),
+                            "lt" => format!("(attributes->>'{}'::text)::numeric < ${}", field, params.len() + 1),
+                            "gte" => format!("(attributes->>'{}'::text)::numeric >= ${}", field, params.len() + 1),
+                            "lte" => format!("(attributes->>'{}'::text)::numeric <= ${}", field, params.len() + 1),
+                            "like" => format!("attributes->>'{}' LIKE ${}", field, params.len() + 1),
+                            "in" => {
+                                if let Some(arr) = value.as_array() {
+                                    let placeholders: Vec<String> = (0..arr.len())
+                                        .map(|i| format!("${}", params.len() + 1 + i))
+                                        .collect();
+                                    params.extend(arr.iter().map(|v| v as &(dyn tokio_postgres::types::ToSql + Sync)));
+                                    format!("attributes->>'{}' IN ({})", field, placeholders.join(","))
+                                } else {
+                                    return Err(ApiError::InvalidQuery("'in' operator requires an array".to_string()));
+                                }
+                            },
+                            _ => return Err(ApiError::InvalidQuery(format!("Unsupported operator: {}", op))),
+                        };
+                        
+                        if op != "in" {
+                            params.push(value);
+                        }
+                        conditions.push(condition);
+                    }
+                }
+            }
+        }
+
+        // Add conditions to SQL query
+        if !conditions.is_empty() {
+            sql.push_str(" AND ");
+            sql.push_str(&conditions.join(" AND "));
+        }
+
+        // Execute query
+        let rows = client.query(&sql, &params[..]).await?;
+
+        // Convert rows to features
+        let features = rows.into_iter().map(|row| Feature {
+            id: row.get("id"),
+            dataset_id: row.get("dataset_id"),
+            feature_id: row.get("feature_id"),
+            geometry: serde_json::from_str(&row.get::<_, String>("geometry")).unwrap(),
+            attributes: row.get::<_, Json<Value>>("attributes").0,
+            input_srid: 4326,  // Features from DB are always in WGS84
+            api_key: row.get("api_key"),
+        }).collect();
+
+        Ok(features)
     }
 }
 

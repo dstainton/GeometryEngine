@@ -13,4 +13,7 @@ RUN cargo install --locked cargo-watch
 
 COPY . .
 
-CMD ["cargo", "watch", "-x", "run"] 
+CMD ["cargo", "watch", "-x", "run"]
+
+EXPOSE 8080
+ENV SWAGGER_UI_ENABLED=true 
